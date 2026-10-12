@@ -1,0 +1,11 @@
+out/
+cache/
+broadcast/
+.env
+foundry.lock
+node_modules/
+
+# agent tooling: never committed (founder 2026-10-13)
+.claude/
+.superpowers/
+docs/superpowers/
