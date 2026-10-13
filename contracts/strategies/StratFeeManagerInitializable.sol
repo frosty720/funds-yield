@@ -41,7 +41,8 @@ contract StratFeeManagerInitializable is OwnableUpgradeable, PausableUpgradeable
     uint256 public lastPositionAdjustment;
 
     /// @notice The duration of the locked rewards
-    uint256 constant DURATION = 1 hours;
+    /// @dev FrostyFi 2026-10-13 (final review I1): 1 day, the keeper's harvest interval (Beefy: 1 hour).
+    uint256 constant DURATION = 1 days;
 
     // Events
     event SetUnirouter(address unirouter);

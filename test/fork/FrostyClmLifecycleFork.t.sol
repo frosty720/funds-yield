@@ -178,6 +178,7 @@ contract FrostyClmLifecycleForkTest is ClmForkBase {
 		skip(1 days);
 		(uint256 wethBefore, uint256 usdcBefore) = vault.balances();
 		strategy.harvest();
+		skip(1 days); // the proceeds unlock over a day (final review I1)
 		(uint256 wethAfter, uint256 usdcAfter) = vault.balances();
 		assertGt(usdcAfter, usdcBefore, 'the sale landed on the USDC side');
 		assertApproxEqAbs(wethAfter, wethBefore, 1);

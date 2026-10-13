@@ -14,6 +14,8 @@ contract FrostyClmHarvestForkTest is ClmForkBase {
 	bytes32 internal constant CLAIMED = keccak256('ClaimedRewards(uint256)');
 	bytes32 internal constant FEE_PAID = keccak256('PerformanceFeePaid(address,uint256)');
 	bytes32 internal constant COMPOUNDED = keccak256('Compounded(uint256,uint256)');
+	/// @dev StratFeeManagerInitializable.DURATION (internal): how long a harvest's proceeds stay locked.
+	uint256 internal constant LOCK_DURATION = 1 days;
 
 	function setUp() public {
 		_setUpFork();
@@ -30,7 +32,7 @@ contract FrostyClmHarvestForkTest is ClmForkBase {
 		uint256 treasuryBefore = IERC20(AERO).balanceOf(TREASURY);
 
 		vm.recordLogs();
-		vm.prank(bob); // anyone may harvest
+		vm.prank(keeper); // the keeper or the owner (final review I2)
 		strategy.harvest();
 		Vm.Log[] memory logs = vm.getRecordedLogs();
 
@@ -47,11 +49,60 @@ contract FrostyClmHarvestForkTest is ClmForkBase {
 		uint256 fair = vi.calcCanonicalAssetValue(AERO, sold, USDC);
 		assertGe(received, fair * 9800 / 10_000, 'within MAX_SALE_SLIPPAGE_BPS of the VI');
 
-		(uint256 usdcAfter, uint256 btcAfter) = vault.balances();
 		// Removing and re-adding liquidity rounds down by a few wei per position.
-		assertApproxEqAbs(usdcAfter, usdcBefore + received, 10, 'the USDC went back into the vault');
+		(uint256 usdcAfter, uint256 btcAfter) = vault.balances();
+		assertApproxEqAbs(usdcAfter, usdcBefore, 10, 'the compounded USDC is locked at first (final review I1)');
 		assertApproxEqAbs(btcAfter, btcBefore, 10, 'no cbBTC moved');
 		assertEq(strategy.lastHarvest(), block.timestamp);
+		skip(LOCK_DURATION);
+		(usdcAfter,) = vault.balances();
+		assertApproxEqAbs(usdcAfter, usdcBefore + received, 10, 'all of it reaches the share price after the lock');
+	}
+
+	function test_harvest_strangerCannotHarvest() public {
+		vm.skip(!forked);
+		skip(1 days);
+		vm.prank(bob);
+		vm.expectRevert(StratFeeManagerInitializable.NotManager.selector);
+		strategy.harvest();
+	}
+
+	function test_harvest_releasesTheProceedsLinearly() public {
+		vm.skip(!forked);
+		skip(1 days);
+		(uint256 usdcBefore,) = vault.balances();
+		vm.recordLogs();
+		strategy.harvest();
+		(, uint256 received) = _compounded(vm.getRecordedLogs());
+		assertGt(received, 0);
+		skip(LOCK_DURATION / 2);
+		(uint256 usdcHalf,) = vault.balances();
+		assertApproxEqAbs(usdcHalf, usdcBefore + received / 2, 10, 'half released at half the lock');
+	}
+
+	/// @dev Final review I1: Bob deposits just before a harvest and leaves right after. He must not walk off with his
+	///      pro-rata share of the AERO the vault earned before he arrived.
+	function test_jitDeposit_takesNoShareOfEarlierYield() public {
+		vm.skip(!forked);
+		skip(1 days);
+		uint256 shares = _deposit(bob, 50_000e6, 0.5e8);
+		uint256 kept0 = IERC20(USDC).balanceOf(bob);
+		uint256 kept1 = IERC20(CBBTC).balanceOf(bob);
+		int256 in0 = int256(50_000e6) - int256(kept0);
+		int256 in1 = int256(0.5e8) - int256(kept1);
+		_settle();
+		vm.recordLogs();
+		strategy.harvest();
+		(, uint256 received) = _compounded(vm.getRecordedLogs());
+		uint256 bobProRata = received * shares / vault.totalSupply();
+		_settle();
+		vm.prank(bob);
+		vault.withdraw(shares, 0, 0);
+		int256 out0 = int256(IERC20(USDC).balanceOf(bob)) - int256(kept0);
+		int256 out1 = int256(IERC20(CBBTC).balanceOf(bob)) - int256(kept1);
+		// Bob's gain in USDC (token0) units, at the pool's price: cbBTC raw × 1e36 / price.
+		int256 gain = (out0 - in0) + (out1 - in1) * 1e36 / int256(strategy.price());
+		assertLt(gain, int256(bobProRata / 100), 'under 1% of what an unlocked harvest would hand him');
 	}
 
 	function test_harvest_readsTheFeeFromTheFactory() public {

@@ -468,8 +468,9 @@ contract FrostyClmStrategy is StratFeeManagerInitializable, IStrategyConcLiq, IS
     }
 
     /// @notice FrostyFi 2026-10-11: claim the gauge's output, sell it into `compoundToken` and add it back as liquidity.
-    ///         Anyone may call it. Beefy's call fee is gone: our keeper harvests.
-    function harvest() external {
+    ///         Keeper or owner only (final review I2, 2026-10-13): a harvest re-stakes, which restarts every holder's
+    ///         exit delay, and a public one let anyone do that for free and time the sale for a sandwich.
+    function harvest() external onlyManager {
         _harvest();
     }
 
@@ -483,10 +484,11 @@ contract FrostyClmStrategy is StratFeeManagerInitializable, IStrategyConcLiq, IS
 
         uint256 toSell = fees;
         uint256 minOut = _saleMinimum(toSell);
+        uint256 received;
         // Too little to sell (the oracle values it at 0 units of compoundToken): it waits for the next harvest.
         if (minOut != 0) {
             fees = 0;
-            uint256 received = _sellOutput(toSell, minOut);
+            received = _sellOutput(toSell, minOut);
             emit Compounded(toSell, received);
         }
 
@@ -495,6 +497,13 @@ contract FrostyClmStrategy is StratFeeManagerInitializable, IStrategyConcLiq, IS
             _removeLiquidity();
             _addLiquidity();
         }
+
+        // FrostyFi 2026-10-13 (final review I1): the proceeds reach the share price linearly over DURATION, so capital
+        // that arrives just before a harvest can't take the yield earned before it arrived (Beefy's compounding CLM,
+        // StrategyPassiveManagerUniswap._harvest).
+        (uint256 currentLock0, uint256 currentLock1) = lockedProfit();
+        totalLocked0 = currentLock0 + (compoundToken == lpToken0 ? received : 0);
+        totalLocked1 = currentLock1 + (compoundToken == lpToken1 ? received : 0);
 
         lastHarvest = block.timestamp;
         emit HarvestRewards(toSell);
@@ -559,12 +568,38 @@ contract FrostyClmStrategy is StratFeeManagerInitializable, IStrategyConcLiq, IS
     function balances() public view returns (uint256 token0Bal, uint256 token1Bal) {
         (uint256 thisBal0, uint256 thisBal1) = balancesOfThis();
         (uint256 poolBal0, uint256 poolBal1,,,,) = balancesOfPool();
+        // FrostyFi 2026-10-13 (final review I1): still-locked harvest proceeds aren't in the share price yet.
+        (uint256 locked0, uint256 locked1) = lockedProfit();
 
-        uint256 total0 = thisBal0 + poolBal0;
-        uint256 total1 = thisBal1 + poolBal1;
+        uint256 total0 = thisBal0 + poolBal0 - locked0;
+        uint256 total1 = thisBal1 + poolBal1 - locked1;
 
         // For token0 and token1 we return balance of this contract + balance of positions.
         return (total0, total1);
+    }
+
+    /**
+     * @notice FrostyFi 2026-10-13 (final review I1): the part of past harvests' proceeds not yet released to the share
+     *         price. Released linearly over DURATION and capped at what the strategy holds, as in Beefy's compounding CLM
+     *         (StrategyPassiveManagerUniswap.lockedProfit).
+     * @return locked0 The amount of token0 locked.
+     * @return locked1 The amount of token1 locked.
+     */
+    function lockedProfit() public override view returns (uint256 locked0, uint256 locked1) {
+        (uint256 balThis0, uint256 balThis1) = balancesOfThis();
+        (uint256 balPool0, uint256 balPool1,,,,) = balancesOfPool();
+        uint256 totalBal0 = balThis0 + balPool0;
+        uint256 totalBal1 = balThis1 + balPool1;
+
+        uint256 elapsed = block.timestamp - lastHarvest;
+        uint256 remaining = elapsed < DURATION ? DURATION - elapsed : 0;
+
+        // Make sure we don't lock more than we have.
+        if (totalBal0 > totalLocked0) locked0 = totalLocked0 * remaining / DURATION;
+        else locked0 = totalBal0 * remaining / DURATION;
+
+        if (totalBal1 > totalLocked1) locked1 = totalLocked1 * remaining / DURATION;
+        else locked1 = totalBal1 * remaining / DURATION;
     }
 
     /**
