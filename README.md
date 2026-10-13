@@ -21,8 +21,8 @@ pools are deployed with `cast` (same rule as MAINNET_RUNBOOK_FUNDS.md for listin
    ```bash
    D=<ClmPoolDeployer address>
    jq -c '.[]' script/config/base-mainnet-pools.json | while read -r p; do
-     cast send $D 'deployPool((address,int56,address,int24,address,string,uint32))' \
-       "($(echo "$p" | jq -r '[.gauge,.maxTickDeviation,.pool,.positionWidth,.stockToken,.symbol,.twapInterval]|map(tostring)|join(",")'))" \
+     cast send $D 'deployPool((address,address,int56,address,int24,string,uint32))' \
+       "($(echo "$p" | jq -r '[.compoundToken,.gauge,.maxTickDeviation,.pool,.positionWidth,.symbol,.twapInterval]|map(tostring)|join(",")'))" \
        --rpc-url base --account frosty-main
    done
    ```

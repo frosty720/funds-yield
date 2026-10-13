@@ -183,4 +183,22 @@ contract FrostyClmLifecycleForkTest is ClmForkBase {
 		assertGt(usdcAfter, usdcBefore, 'the sale landed on the USDC side');
 		assertApproxEqAbs(wethAfter, wethBefore, 1);
 	}
+
+	/// @dev Plan 1b: on Slipstream-2 a read of the delay starved of gas must never come back as "no delay" (a claim inside
+	///      the minimum stake time forfeits the reward). At every gas limit a successful read is the real 30 s. Measured
+	///      2026-10-13: when the inner call runs out of gas, the 1/64 left can't finish the outer frame either, so the
+	///      CallStarved guard is a safety net for a costlier gauge factory, not a path this one reaches.
+	function test_minActionDelay_starvedCallNeverReadsAsNoDelay() public {
+		vm.skip(!forked);
+		assertEq(strategy.minActionDelay(), 30, 'the Slipstream-2 test pools: 30 s');
+		uint256 successes;
+		for (uint256 g = 2_000; g < 40_000; g += 250) {
+			(bool ok, bytes memory ret) = address(strategy).staticcall{gas: g}(abi.encodeCall(FrostyClmStrategy.minActionDelay, ()));
+			if (ok) {
+				assertEq(abi.decode(ret, (uint256)), 30, 'a successful read is the real delay');
+				++successes;
+			}
+		}
+		assertGt(successes, 0, 'the sweep reached gas limits that succeed');
+	}
 }

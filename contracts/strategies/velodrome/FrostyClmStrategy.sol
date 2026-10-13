@@ -111,6 +111,7 @@ contract FrostyClmStrategy is StratFeeManagerInitializable, IStrategyConcLiq, IS
     error TooMuchSlippage();
     error InvalidTicks();
     error ActionLocked(uint256 unlockAt);
+    error CallStarved();
 
     // Events
     event TVL(uint256 bal0, uint256 bal1);
@@ -171,9 +172,18 @@ contract FrostyClmStrategy is StratFeeManagerInitializable, IStrategyConcLiq, IS
 
     /// @notice Returns the minimum action delay for the strategy.
     /// @return The minimum action delay in seconds.
+    /// @dev FrostyFi 2026-10-13 (plan 1b): Slipstream-1 and -3 gauges are an older CLGauge with no minimum stake time and
+    ///      no early-claim penalty; their factories have no `minStakeTimes`, so the delay there is 0. A read that failed
+    ///      for want of gas reverts instead: on Slipstream-2 a claim inside the minimum stake time forfeits the reward.
     function minActionDelay() public view returns (uint256) {
         address factory = ICLGauge(gauge).gaugeFactory();
-        return ICLGaugeFactory(factory).minStakeTimes(pool);
+        uint256 gasBefore = gasleft();
+        try ICLGaugeFactory(factory).minStakeTimes(pool) returns (uint256 delay) {
+            return delay;
+        } catch {
+            if (gasleft() < gasBefore / 63) revert CallStarved();
+            return 0;
+        }
     }
 
     /// @custom:oz-upgrades-unsafe-allow constructor

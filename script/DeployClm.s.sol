@@ -13,8 +13,8 @@ import {FrostyClmVaultFactory} from '../contracts/vault/FrostyClmVaultFactory.so
 ///            KEEPER_ADDRESS=<keeper Engine wallet> forge script script/DeployClm.s.sol --rpc-url base
 ///              --account frosty-main --sender <deployer> --broadcast --slow --verify
 ///         2. cast, once per entry of script/config/base-mainnet-pools.json (Beefy's live settings, 2026-10-11):
-///            cast send <poolDeployer> 'deployPool((address,int56,address,int24,address,string,uint32))' '(<gauge>,
-///              <maxTickDeviation>,<pool>,<positionWidth>,<stockToken>,<symbol>,<twapInterval>)' --rpc-url base
+///            cast send <poolDeployer> 'deployPool((address,address,int56,address,int24,string,uint32))' '(<compoundToken>,
+///              <gauge>,<maxTickDeviation>,<pool>,<positionWidth>,<symbol>,<twapInterval>)' --rpc-url base
 ///              --account frosty-main
 ///         3. forge, read-only: writes deployments/base-mainnet-clm.json from the chain.
 ///            forge script script/DeployClm.s.sol --sig 'writeDeployments(address)' <poolDeployer> --rpc-url base

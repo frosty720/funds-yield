@@ -80,18 +80,25 @@ abstract contract ClmForkBase is Test {
 	}
 
 	function _deployVault(address pool_, address gauge, int24 width, int56 deviation) internal {
+		_deployVaultOn(pool_, gauge, NFT_MANAGER, USDC, width, deviation);
+	}
+
+	/// @dev Any Slipstream deployment (its own NFT manager) and any pool token as the compound token.
+	function _deployVaultOn(address pool_, address gauge, address nftManager, address compoundToken, int24 width, int56 deviation)
+		internal
+	{
 		pool = pool_;
 		strategy = FrostyClmStrategy(payable(strategyFactory.createStrategy(STRATEGY_NAME)));
 		vault = vaultFactory.cloneVault();
 		vault.initialize(address(strategy), 'FrostyFi CLM test', 'fcTEST');
 		strategy.initialize(
 			pool_,
-			NFT_MANAGER,
+			nftManager,
 			gauge,
 			AERO,
 			width,
 			AERO_POOL_FACTORY,
-			USDC,
+			compoundToken,
 			StratFeeManagerInitializable.CommonAddresses({
 				vault: address(vault),
 				unirouter: AERO_ROUTER,
