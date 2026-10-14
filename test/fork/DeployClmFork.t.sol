@@ -14,10 +14,15 @@ import {ICLPoolLike} from './ClmForkBase.sol';
 /// @notice Rehearses the deploy on a Base fork (final review C1, 2026-10-11). forge simulates every script locally, and
 ///         stock tokens (B20) only run on Base's own node, so the forge script deploys the factories and ClmPoolDeployer
 ///         only, and each stock pool is deployed by `cast send ClmPoolDeployer.deployPool(...)`. Here the full pool
-///         deploy runs on the USDC/cbBTC test pool; the 10 stock entries get every check that only reads their pool.
+///         deploy runs on the USDC/cbBTC test pool and on every config entry without a stock token (2026-10-14); the
+///         stock entries get every check that only reads their pool.
 contract DeployClmForkTest is Test {
 	address internal constant USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913;
+	address internal constant WETH = 0x4200000000000000000000000000000000000006;
+	address internal constant SLIPSTREAM1_FACTORY = 0x5e7BB104d84c7CB9B682AaC2F3d509f5F406809A;
 	address internal constant SLIPSTREAM2_FACTORY = 0xf8f2eB4940CFE7d13603DDDD87f123820Fc061Ef;
+	address internal constant SLIPSTREAM3_FACTORY = 0xaDe65c38CD4849aDBA595a4323a8C7DdfE89716a;
+	address internal constant MORPHO = 0xBAa5CC21fd487B8Fcc2F632f3F4E8D37262a0842;
 	address internal keeper = makeAddr('keeper');
 	address internal stranger = makeAddr('stranger');
 	bool internal forked;
@@ -115,9 +120,13 @@ contract DeployClmForkTest is Test {
 			script.deployCore(keeper, keeper, address(this));
 		(FrostyClmStrategy strategy, FrostyClmVault vault) = deployer.deployPool(_cbBtcConfig());
 
+		// the real deploy's book (committed 2026-10-14) is put back as it was: this test once deleted it
+		bool hadBook = vm.exists(script.OUTPUT_PATH());
+		string memory realBook = hadBook ? vm.readFile(script.OUTPUT_PATH()) : '';
 		script.writeDeployments(deployer);
 		string memory json = vm.readFile(script.OUTPUT_PATH());
-		vm.removeFile(script.OUTPUT_PATH()); // the file must exist only after a real deploy
+		if (hadBook) vm.writeFile(script.OUTPUT_PATH(), realBook);
+		else vm.removeFile(script.OUTPUT_PATH()); // the file must exist only after a real deploy
 
 		assertEq(vm.parseJsonAddress(json, '.strategyFactory'), address(strategyFactory));
 		assertEq(vm.parseJsonAddress(json, '.vaultFactory'), address(vaultFactory));
@@ -130,18 +139,47 @@ contract DeployClmForkTest is Test {
 		assertEq(vm.parseJsonAddress(json, '.vaults.USDC-cbBTC.gauge'), _cbBtcConfig().gauge);
 	}
 
-	function test_stockConfig_matchesTheChain() public {
+	/// @notice Every entry: a pool of one of the three Slipstream deployments, its own gauge, and a compound token that is
+	///         one of its two tokens and USDC or WETH. Harvests sell AERO in one hop on an Aerodrome basic pool, and only
+	///         AERO/USDC and AERO/WETH are deep (2026-10-14: AERO/cbBTC held 807 AERO, AERO/EURC 0, AERO/cbXRP 2). No AERO
+	///         pair: the strategy refuses a pool holding its own reward token (FrostyClmStrategy.initialize, InvalidInput).
+	function test_poolConfig_matchesTheChain() public {
 		vm.skip(!forked);
 		ClmPoolDeployer.PoolConfig[] memory pools = script.readPools();
-		assertEq(pools.length, 10);
+		assertEq(pools.length, 25);
 		for (uint256 i; i < pools.length; ++i) {
 			ICLPoolLike p = ICLPoolLike(pools[i].pool);
-			assertEq(p.factory(), SLIPSTREAM2_FACTORY, pools[i].symbol);
-			assertEq(pools[i].compoundToken, USDC, pools[i].symbol);
-			assertEq(p.token0(), USDC, pools[i].symbol);
+			address f = p.factory();
+			assertTrue(f == SLIPSTREAM1_FACTORY || f == SLIPSTREAM2_FACTORY || f == SLIPSTREAM3_FACTORY, pools[i].symbol);
+			assertTrue(pools[i].compoundToken == USDC || pools[i].compoundToken == WETH, pools[i].symbol);
+			assertTrue(p.token0() == pools[i].compoundToken || p.token1() == pools[i].compoundToken, pools[i].symbol);
 			assertEq(p.gauge(), pools[i].gauge, pools[i].symbol);
-			// The stock token itself (token1, B20) runs no code on a fork, not even symbol(): its label isn't checked here.
+			// A stock token (B20) runs no code on a fork, not even symbol(): labels aren't checked here.
 		}
+	}
+
+	/// @notice Every entry without a stock token deploys for real on the fork, as `cast send deployPool` will on Base,
+	///         except WETH-MORPHO: MORPHO's code uses an opcode newer than this repo's pinned paris EVM (NotActivated on
+	///         approve), so it only runs on Base itself (the deploy script's CHECK_ONLY mode eth_calls it there).
+	function test_poolConfig_everyNonStockEntryDeploys() public {
+		vm.skip(!forked);
+		(,, ClmPoolDeployer deployer) = script.deployCore(keeper, keeper, address(this));
+		ClmPoolDeployer.PoolConfig[] memory pools = script.readPools();
+		uint256 deployed;
+		for (uint256 i; i < pools.length; ++i) {
+			ICLPoolLike p = ICLPoolLike(pools[i].pool);
+			if (_isStock(p.token0()) || _isStock(p.token1()) || p.token0() == MORPHO || p.token1() == MORPHO) continue;
+			(FrostyClmStrategy strategy, FrostyClmVault vault) = deployer.deployPool(pools[i]);
+			assertEq(strategy.compoundToken(), pools[i].compoundToken, pools[i].symbol);
+			assertEq(vault.name(), string.concat('FrostyFi CLM ', pools[i].symbol));
+			++deployed;
+		}
+		assertEq(deployed, 14);
+	}
+
+	/// @dev Coinbase's B20 stock tokens live at 0xb2000000000000000000…: a Base precompile Foundry can't run.
+	function _isStock(address token) private pure returns (bool) {
+		return uint160(token) >> 80 == 0xb2000000000000000000;
 	}
 
 	function test_deployPool_slipstream1WethPair() public {
