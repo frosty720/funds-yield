@@ -1,0 +1,54 @@
+{
+  "poolDeployer": "0x8a494d4f32A228c3839CF12E640707296B8e63E7",
+  "strategyFactory": "0x99c49323e589136BD4F9937b6ae226fD25A267aa",
+  "strategyImplementation": "0x6850E8e29D6EAC6376b6460c2C62c83014491EC9",
+  "strategyName": "FrostyClmStrategy-v2",
+  "vaultFactory": "0x13a4FD7dD96D01BA22bddF8e3D8B56b81c073C74",
+  "vaults": {
+    "USDC-METAc": {
+      "pool": "0xd072410fa13D242e1d53721Bcf7AF02e3455DC96",
+      "strategy": "0x382F43b6e85844BfF68CD436E666CbFcd46CFe22",
+      "vault": "0x6B4A0F278b8438A71E764dfe4d5529A17AfFBAad"
+    },
+    "USDC-MSFTc": {
+      "pool": "0x2740C0faAb738F6e346e545fDE02aEF9B1A01ee7",
+      "strategy": "0x7C96734801547640c6B37723cFb34f23d4A56300",
+      "vault": "0xAdA59c6fDE13258a20765AC7c34eb57918fEEe04"
+    },
+    "USDC-MSTRc": {
+      "pool": "0x66DCd42E6314B287110922AE36cB2a8bdEECc153",
+      "strategy": "0xa11f2c01903c963A091f8eBD9234b15de563971c",
+      "vault": "0xeeAf2D766B148A62e74e8aF6a2427769fD5fe784"
+    },
+    "USDC-NVDAc": {
+      "pool": "0xF668e21993f0ACd7ab00BB1cFbAeD0df28A3C8EC",
+      "strategy": "0x3A528484301d26597b9Bf44567e01eBB43e8a604",
+      "vault": "0x5711FD24A8ADc8299a889fE7db87Ff7d58cA1C38"
+    },
+    "USDC-SNDKc": {
+      "pool": "0x2836e062a3fe75943a7F4A552E2365b98E414E75",
+      "strategy": "0x90508Cb04aa7eD3061B82156BF25745aa892950A",
+      "vault": "0x07e73B9a5dC752C6080e8f71659a26CA229bed4E"
+    },
+    "USDC-SPCXc": {
+      "pool": "0x880dB7Dda4407D99508574E680d067D1164B3cFE",
+      "strategy": "0x5B94b318CB165D12cbF1BE6A25f495659a6C3D3E",
+      "vault": "0xEaddDD1676ED0778d40173dc1eBEAfC44F72DBf2"
+    },
+    "USDC-TSLAc": {
+      "pool": "0x7A33000372f3F028f074182CCb9d16cBEEfBF920",
+      "strategy": "0x6B5568E21dbfE23EF0E77Cfd1d7eE5682F2C0cEa",
+      "vault": "0x168d58f053777554b6EAd678888d7f031c675071"
+    },
+    "USDC-WETH": {
+      "pool": "0x4A7af46bC8aBc00048c6c7920a1488DAF568366c",
+      "strategy": "0x1Bda2790A85164539521656d24dF36aA3BEdcd45",
+      "vault": "0x7be92D15f7cC0E458fa06243072197440E47b234"
+    },
+    "USDC-cbBTC": {
+      "pool": "0x42609aA1E58C5dD7E5a012DC74118fFf975F0Eac",
+      "strategy": "0xDF0549ED6AcFe0D9507d6c59a55fa3776D2cAcdB",
+      "vault": "0xDa79Be066e096560017c70793EEB376E1287c9B4"
+    }
+  }
+}
