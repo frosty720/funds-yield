@@ -1,0 +1,347 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.23;
+
+import {Test, Vm} from 'forge-std/Test.sol';
+import {IERC20} from '@openzeppelin-4/contracts/token/ERC20/IERC20.sol';
+import {IERC721} from '@openzeppelin-4/contracts/token/ERC721/IERC721.sol';
+import {FrostyClmStrategyV2} from '../../contracts/strategies/aero/FrostyClmStrategyV2.sol';
+import {FrostyClmStrategyFactory} from '../../contracts/strategies/FrostyClmStrategyFactory.sol';
+import {StratFeeManagerInitializable} from '../../contracts/strategies/StratFeeManagerInitializable.sol';
+import {FrostyClmVault} from '../../contracts/vault/FrostyClmVault.sol';
+import {FrostyClmVaultFactory} from '../../contracts/vault/FrostyClmVaultFactory.sol';
+import {ClmPoolDeployerV2} from '../../contracts/deploy/ClmPoolDeployerV2.sol';
+import {TickMath} from '../../contracts/utils/TickMath.sol';
+import {MockValueInterpreter} from '../mocks/MockValueInterpreter.sol';
+
+interface IAeroPool {
+	function slot0() external view returns (uint160 sqrtPriceX96, int24 tick, uint16, uint16, uint16, bool);
+	function tickSpacing() external view returns (int24);
+	function swap(address recipient, bool zeroForOne, int256 amountSpecified, uint160 sqrtPriceLimitX96, bytes calldata data)
+		external
+		returns (int256 amount0, int256 amount1);
+}
+
+/// @notice FrostyClmStrategyV2 on Aero's Slipstream (FrostyFi 2026-10-25): deployed fresh on Base after the Aero upgrade
+///         over Aero's WETH/USDC pool (B20 stock tokens can't run on a fork). The vault never stakes; a harvest collects
+///         the positions' trading fees, pays the 9.5% fee in both tokens and compounds the rest.
+///         Run: BASE_MAINNET_RPC=<archive url> forge test --match-contract FrostyClmV2AeroFork -vv
+contract FrostyClmV2AeroForkTest is Test {
+	// Aero (Dromos-Labs metadex-slipstream-public deployment-addresses/cl-base.json, checked on chain 2026-10-25)
+	address internal constant AERO_NFT_MANAGER = 0x4857DB576eE0e45F10525eC59527BfD10beeC60b;
+	address internal constant POOL = 0x4A7af46bC8aBc00048c6c7920a1488DAF568366c; // WETH/USDC 0.04%, tick spacing 50
+	// Aerodrome's (pre-upgrade) Slipstream-2 WETH/USDC pool and its NFT manager
+	address internal constant OLD_POOL = 0x3FE04A59Ebd38cF06080a6F60a98D124eb59392A;
+	address internal constant OLD_NFT_MANAGER = 0xe1f8cd9AC4e4A65F54f38a5CdAfCA44f6dD68b53;
+	address internal constant WETH = 0x4200000000000000000000000000000000000006; // token0
+	address internal constant USDC = 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913; // token1
+	address internal constant TREASURY = 0x47b7702a4789912d0dfFDadC07c50395c293fF0A;
+	uint256 internal constant FORK_BLOCK = 53_075_000; // 2026-10-25, three days after the upgrade
+	string internal constant STRATEGY_NAME = 'FrostyClmStrategy-v2';
+	uint256 internal constant PERF_FEE_BPS = 950;
+	uint256 internal constant DURATION = 1 days; // StratFeeManagerInitializable.DURATION (internal)
+	int24 internal constant WIDTH = 10; // × tick spacing 50 = 500 ticks a side, about ±5%
+
+	bytes32 internal constant FEES_COLLECTED = keccak256('FeesCollected(uint256,uint256,uint256,uint256)');
+	bytes32 internal constant COMPOUNDED = keccak256('Compounded(uint256,uint256)');
+
+	address internal keeper = makeAddr('keeper');
+	address internal rebalancer = makeAddr('rebalancer');
+	address internal alice = makeAddr('alice');
+	address internal bob = makeAddr('bob');
+
+	bool internal forked;
+	FrostyClmStrategyFactory internal strategyFactory;
+	FrostyClmVaultFactory internal vaultFactory;
+	ClmPoolDeployerV2 internal deployer;
+	FrostyClmStrategyV2 internal strategy;
+	FrostyClmVault internal vault;
+
+	function setUp() public {
+		string memory rpc = vm.envOr('BASE_MAINNET_RPC', string(''));
+		if (bytes(rpc).length == 0) return;
+		vm.createSelectFork(rpc, vm.envOr('BASE_FORK_BLOCK_AERO', FORK_BLOCK));
+		// Aero's swap hook (the pool's fee()) uses Cancun opcodes; our code still compiles for paris (Beefy's settings)
+		vm.setEvmVersion('cancun');
+		forked = true;
+
+		strategyFactory = new FrostyClmStrategyFactory(keeper, TREASURY, address(new MockValueInterpreter()), PERF_FEE_BPS);
+		strategyFactory.addStrategy(STRATEGY_NAME, address(new FrostyClmStrategyV2()));
+		strategyFactory.addRebalancer(rebalancer);
+		vaultFactory = new FrostyClmVaultFactory(address(0));
+		deployer = new ClmPoolDeployerV2(strategyFactory, vaultFactory, address(this));
+		(strategy, vault) = deployer.deployPool(_config(POOL, USDC));
+	}
+
+	// ─── deploying ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+	function test_deployer_wiresAnAeroPoolWithNoGauge() public {
+		vm.skip(!forked);
+		assertEq(strategy.pool(), POOL);
+		assertEq(strategy.nftManager(), AERO_NFT_MANAGER);
+		assertEq(strategy.compoundToken(), USDC);
+		assertEq(strategy.positionWidth(), WIDTH);
+		assertEq(strategy.owner(), address(this));
+		assertEq(address(vault.strategy()), address(strategy));
+		(string memory symbol, address pool, address gauge, address strat, address vlt) = deployer.deployments(0);
+		assertEq(symbol, 'WETH-USDC');
+		assertEq(pool, POOL);
+		assertEq(gauge, address(0));
+		assertEq(strat, address(strategy));
+		assertEq(vlt, address(vault));
+		assertEq(strategy.actionableAt(), 0);
+	}
+
+	function test_deployer_refusesPreUpgradePoolsAndForeignCompoundTokens() public {
+		vm.skip(!forked);
+		vm.expectRevert(abi.encodeWithSelector(ClmPoolDeployerV2.WrongPool.selector, 'WETH-USDC'));
+		deployer.deployPool(_config(OLD_POOL, USDC));
+		vm.expectRevert(abi.encodeWithSelector(ClmPoolDeployerV2.WrongPool.selector, 'WETH-USDC'));
+		deployer.deployPool(_config(POOL, makeAddr('notAPoolToken')));
+		vm.prank(alice);
+		vm.expectRevert(ClmPoolDeployerV2.NotOwner.selector);
+		deployer.deployPool(_config(POOL, USDC));
+	}
+
+	function test_initialize_refusesAnotherFactorysNftManager() public {
+		vm.skip(!forked);
+		FrostyClmStrategyV2 bare = FrostyClmStrategyV2(payable(strategyFactory.createStrategy(STRATEGY_NAME)));
+		vm.expectRevert(FrostyClmStrategyV2.InvalidInput.selector);
+		bare.initialize(POOL, OLD_NFT_MANAGER, WIDTH, USDC, _common(address(vault)));
+	}
+
+	// ─── never staked ───────────────────────────────────────────────────────────────────────────────────────────────
+
+	function test_deposit_mintsPositionsTheStrategyKeeps() public {
+		vm.skip(!forked);
+		_deposit(alice, 10 ether, 30_000e6);
+		(uint256 mainId,,) = strategy.positionMain();
+		(uint256 altId,,) = strategy.positionAlt();
+		assertGt(mainId, 0);
+		assertEq(IERC721(AERO_NFT_MANAGER).ownerOf(mainId), address(strategy)); // not a gauge's
+		if (altId != 0) assertEq(IERC721(AERO_NFT_MANAGER).ownerOf(altId), address(strategy));
+		assertGt(vault.balanceOf(alice), 0);
+	}
+
+	// ─── fees ───────────────────────────────────────────────────────────────────────────────────────────────────────
+
+	function test_harvest_collectsBothTokensFees_paysTheFeeInKind_andLocksTheRest() public {
+		vm.skip(!forked);
+		_deposit(alice, 10 ether, 30_000e6);
+		_trade(8);
+		uint256 treasury0 = IERC20(WETH).balanceOf(TREASURY);
+		uint256 treasury1 = IERC20(USDC).balanceOf(TREASURY);
+
+		vm.recordLogs();
+		vm.prank(keeper);
+		strategy.harvest();
+		(uint256 got0, uint256 got1, uint256 perf0, uint256 perf1) = _feesCollected(vm.getRecordedLogs());
+
+		assertGt(got0, 0, 'WETH fees from selling WETH');
+		assertGt(got1, 0, 'USDC fees from selling USDC');
+		assertEq(perf0, got0 * PERF_FEE_BPS / 10_000);
+		assertEq(perf1, got1 * PERF_FEE_BPS / 10_000);
+		assertEq(IERC20(WETH).balanceOf(TREASURY) - treasury0, perf0, 'the fee is paid in kind');
+		assertEq(IERC20(USDC).balanceOf(TREASURY) - treasury1, perf1);
+		assertEq(strategy.fees0(), 0);
+		assertEq(strategy.fees1(), 0);
+		assertEq(strategy.totalLocked0(), got0 - perf0, 'the rest is locked, to be released over a day');
+		assertEq(strategy.totalLocked1(), got1 - perf1);
+		assertEq(strategy.lastHarvest(), block.timestamp);
+	}
+
+	function test_harvest_reportsTheFeesInUsdc() public {
+		vm.skip(!forked);
+		_deposit(alice, 10 ether, 30_000e6);
+		_trade(8);
+		vm.recordLogs();
+		vm.prank(keeper);
+		strategy.harvest();
+		Vm.Log[] memory logs = vm.getRecordedLogs();
+		(uint256 got0, uint256 got1, uint256 perf0, uint256 perf1) = _feesCollected(logs);
+		uint256 received;
+		for (uint256 i; i < logs.length; ++i) {
+			if (logs[i].emitter == address(strategy) && logs[i].topics[0] == COMPOUNDED) (, received) = abi.decode(logs[i].data, (uint256, uint256));
+		}
+		uint256 expected = (got1 - perf1) + (got0 - perf0) * strategy.price() / 1e36;
+		assertEq(received, expected, 'net fees, WETH valued at the pool price');
+	}
+
+	function test_fees_reachTheSharePriceOnlyOverTheDayAfterAHarvest() public {
+		vm.skip(!forked);
+		_deposit(alice, 10 ether, 30_000e6);
+		_trade(8);
+		(uint256 before0, uint256 before1) = strategy.balances();
+
+		// a deposit collects the fees, but they aren't the depositors' until a harvest releases them
+		_deposit(bob, 0.01 ether, 30e6);
+		assertGt(strategy.fees0() + strategy.fees1(), 0);
+		(uint256 this0, uint256 this1) = strategy.balancesOfThis();
+		assertEq(this0, IERC20(WETH).balanceOf(address(strategy)) - strategy.fees0(), 'balancesOfThis leaves the fees out');
+		assertEq(this1, IERC20(USDC).balanceOf(address(strategy)) - strategy.fees1());
+
+		vm.prank(keeper);
+		strategy.harvest();
+		(uint256 locked0, uint256 locked1) = strategy.lockedProfit();
+		assertEq(locked0, strategy.totalLocked0());
+		assertEq(locked1, strategy.totalLocked1());
+		(uint256 harvest0, uint256 harvest1) = strategy.balances();
+		uint256 valueAtHarvest = _value(harvest0, harvest1);
+
+		skip(DURATION);
+		(uint256 after0, uint256 after1) = strategy.balances();
+		assertGt(_value(after0, after1), valueAtHarvest, 'released after a day');
+		assertGt(_value(after0, after1), _value(before0, before1), 'more than before the fees, plus bob');
+	}
+
+	function test_withdraw_aWholeExitAfterAHarvest() public {
+		vm.skip(!forked);
+		uint256 shares = _deposit(alice, 10 ether, 30_000e6);
+		_trade(8);
+		vm.prank(keeper);
+		strategy.harvest();
+		skip(DURATION);
+		_settle();
+		vm.prank(alice);
+		vault.withdraw(shares, 0, 0);
+		assertEq(vault.balanceOf(alice), 0);
+		assertGt(IERC20(WETH).balanceOf(alice) + IERC20(USDC).balanceOf(alice), 0);
+	}
+
+	// ─── ranges ─────────────────────────────────────────────────────────────────────────────────────────────────────
+
+	function test_moveTicks_followsThePrice() public {
+		vm.skip(!forked);
+		_deposit(alice, 10 ether, 30_000e6);
+		(, int24 lowerBefore, int24 upperBefore) = strategy.positionMain();
+		_pushPrice(upperBefore - _tick() + 100); // out of range above
+		_settle();
+		vm.prank(rebalancer);
+		strategy.moveTicks();
+		(uint256 mainId, int24 lower, int24 upper) = strategy.positionMain();
+		(uint256 altId,,) = strategy.positionAlt();
+		int24 tick = _tick();
+		assertTrue(lower <= tick && tick < upper, 'the new range holds the price');
+		assertTrue(lower != lowerBefore);
+		// out of range above, the vault holds only USDC: no two-sided main position can be minted, so it all sits in
+		// the one-sided alt position until the price comes back (Beefy's design)
+		assertTrue(mainId != 0 || altId != 0, 'the liquidity is back in the pool');
+		if (mainId != 0) assertEq(IERC721(AERO_NFT_MANAGER).ownerOf(mainId), address(strategy));
+		if (altId != 0) assertEq(IERC721(AERO_NFT_MANAGER).ownerOf(altId), address(strategy));
+	}
+
+	/// @dev The bug of 2026-10-18: the first deposit of an exactly equal-value pair left the alt ticks at (0,0) and
+	///      reverted with no reason (FrostyClmStrategy v1 and Beefy's StrategyPassiveManagerVelodromeV4).
+	function test_firstDeposit_ofAnExactTie_works() public {
+		vm.skip(!forked);
+		uint256 amount0 = 1 ether;
+		uint256 amount1 = amount0 * strategy.price() / 1e36; // its value in USDC, to the unit
+		_deposit(alice, amount0, amount1);
+		(, int24 altLower, int24 altUpper) = strategy.positionAlt();
+		assertTrue(altLower != altUpper, 'a real alt range');
+		assertGt(vault.balanceOf(alice), 0);
+	}
+
+	function test_unpause_ofAnEmptyVault_works() public {
+		vm.skip(!forked);
+		vm.startPrank(keeper);
+		strategy.panic(0, 0);
+		strategy.unpause();
+		vm.stopPrank();
+		assertFalse(strategy.paused());
+	}
+
+	function test_panic_thenAWithdrawal() public {
+		vm.skip(!forked);
+		uint256 shares = _deposit(alice, 10 ether, 30_000e6);
+		vm.prank(keeper);
+		strategy.panic(0, 0);
+		(uint256 mainId,,) = strategy.positionMain();
+		assertEq(mainId, 0, 'liquidity out of the pool');
+		vm.prank(alice);
+		vault.withdraw(shares, 0, 0);
+		assertEq(vault.balanceOf(alice), 0);
+	}
+
+	// ─── helpers ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+	function _config(address pool, address compoundToken) internal pure returns (ClmPoolDeployerV2.PoolConfig memory) {
+		return ClmPoolDeployerV2.PoolConfig({
+			compoundToken: compoundToken,
+			maxTickDeviation: 250,
+			pool: pool,
+			positionWidth: WIDTH,
+			symbol: 'WETH-USDC',
+			twapInterval: 120
+		});
+	}
+
+	function _common(address vault_) internal view returns (StratFeeManagerInitializable.CommonAddresses memory) {
+		return StratFeeManagerInitializable.CommonAddresses({
+			vault: vault_, unirouter: address(0), strategist: address(this), factory: address(strategyFactory)
+		});
+	}
+
+	/// @dev The pool's TWAP catches up with its tick (calm again) after the strategy's TWAP interval.
+	function _settle() internal {
+		skip(uint256(strategy.twapInterval()) + 1);
+	}
+
+	function _deposit(address user, uint256 amount0, uint256 amount1) internal returns (uint256 shares) {
+		deal(WETH, user, IERC20(WETH).balanceOf(user) + amount0);
+		deal(USDC, user, IERC20(USDC).balanceOf(user) + amount1);
+		vm.startPrank(user);
+		IERC20(WETH).approve(address(vault), amount0);
+		IERC20(USDC).approve(address(vault), amount1);
+		uint256 before = vault.balanceOf(user);
+		vault.deposit(amount0, amount1, 0);
+		shares = vault.balanceOf(user) - before;
+		vm.stopPrank();
+		_settle();
+	}
+
+	/// @dev `rounds` of selling 20 WETH, then selling back the USDC it got: fees in both tokens, the price back near
+	///      where it started (the range keeps earning).
+	function _trade(uint256 rounds) internal {
+		for (uint256 i; i < rounds; ++i) {
+			(, int256 out1) = IAeroPool(POOL).swap(address(this), true, 20 ether, TickMath.MIN_SQRT_RATIO + 1, '');
+			IAeroPool(POOL).swap(address(this), false, -out1, TickMath.MAX_SQRT_RATIO - 1, '');
+		}
+		_settle();
+	}
+
+	function _pushPrice(int24 ticks) internal {
+		IAeroPool(POOL).swap(address(this), ticks < 0, type(int128).max, TickMath.getSqrtRatioAtTick(_tick() + ticks), '');
+	}
+
+	function _tick() internal view returns (int24 tick) {
+		(, tick,,,,) = IAeroPool(POOL).slot0();
+	}
+
+	function uniswapV3SwapCallback(int256 amount0Delta, int256 amount1Delta, bytes calldata) external {
+		require(msg.sender == POOL, 'not the pool');
+		if (amount0Delta > 0) _pay(WETH, uint256(amount0Delta));
+		if (amount1Delta > 0) _pay(USDC, uint256(amount1Delta));
+	}
+
+	function _pay(address token, uint256 amount) private {
+		deal(token, address(this), IERC20(token).balanceOf(address(this)) + amount);
+		IERC20(token).transfer(msg.sender, amount);
+	}
+
+	function _feesCollected(Vm.Log[] memory logs) internal view returns (uint256 got0, uint256 got1, uint256 perf0, uint256 perf1) {
+		for (uint256 i; i < logs.length; ++i) {
+			if (logs[i].emitter == address(strategy) && logs[i].topics[0] == FEES_COLLECTED) {
+				(uint256 a0, uint256 a1, uint256 p0, uint256 p1) = abi.decode(logs[i].data, (uint256, uint256, uint256, uint256));
+				got0 += a0;
+				got1 += a1;
+				perf0 += p0;
+				perf1 += p1;
+			}
+		}
+	}
+
+	/// @dev USDC value at the pool price.
+	function _value(uint256 amount0, uint256 amount1) internal view returns (uint256) {
+		return amount1 + amount0 * strategy.price() / 1e36;
+	}
+}
