@@ -5,6 +5,11 @@
   "strategyName": "FrostyClmStrategy-v2",
   "vaultFactory": "0x13a4FD7dD96D01BA22bddF8e3D8B56b81c073C74",
   "vaults": {
+    "USDC-GOOGLc": {
+      "pool": "0x16c70F04C3080a127486Cdf5a4C33c066bBF47C3",
+      "strategy": "0xFcf1a1FE1B14CA5129918e104eCb5D86E3B6b11F",
+      "vault": "0x07bBd99f9e5098A525789860e83646F3d69Eb634"
+    },
     "USDC-METAc": {
       "pool": "0xd072410fa13D242e1d53721Bcf7AF02e3455DC96",
       "strategy": "0x382F43b6e85844BfF68CD436E666CbFcd46CFe22",
@@ -49,6 +54,26 @@
       "pool": "0x42609aA1E58C5dD7E5a012DC74118fFf975F0Eac",
       "strategy": "0xDF0549ED6AcFe0D9507d6c59a55fa3776D2cAcdB",
       "vault": "0xDa79Be066e096560017c70793EEB376E1287c9B4"
+    },
+    "WETH-EURC": {
+      "pool": "0x4dbdcB087992404Ea9B14fA83cc695b02797F39a",
+      "strategy": "0x8F75e5b3902615324891a01Db72Cb2d70a60BCC4",
+      "vault": "0x306247D0bB41A74Ab5be045Bf526ea3A92904A45"
+    },
+    "WETH-MORPHO": {
+      "pool": "0x3626a7c07CF4a7EdEF2eC5d5d4B25bc8ab2C03F2",
+      "strategy": "0x9984150D0119dDe138f9c1F76Fb8Bf5c1bB51E30",
+      "vault": "0x149fA9dD77341EF2667A48922056Cf4c5327522e"
+    },
+    "WETH-USDT": {
+      "pool": "0x2DBe0E264C7C246e05c6614794899937f264cf7b",
+      "strategy": "0x33df462fA0921711FFD74864d82f6bbEE22F2845",
+      "vault": "0xE10CF80Cdd7D0970a8a796e7E58d29fe1c864535"
+    },
+    "WETH-VVV": {
+      "pool": "0xdeBAEbE5B2729f7D62072b2eA40472d78d2C1626",
+      "strategy": "0x6e19Dd9cB6538166863606085EEeC4D33cB91628",
+      "vault": "0xcAAC2Af8004dC559f36906Ac95eBc898304544af"
     }
   }
 }
