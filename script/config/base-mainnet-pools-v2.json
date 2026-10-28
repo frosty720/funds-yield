@@ -70,5 +70,45 @@
 		"positionWidth": 20,
 		"symbol": "USDC-cbBTC",
 		"twapInterval": 120
+	},
+	{
+		"compoundToken": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+		"maxTickDeviation": 9,
+		"pool": "0x16c70F04C3080a127486Cdf5a4C33c066bBF47C3",
+		"positionWidth": 50,
+		"symbol": "USDC-GOOGLc",
+		"twapInterval": 120
+	},
+	{
+		"compoundToken": "0x4200000000000000000000000000000000000006",
+		"maxTickDeviation": 5,
+		"pool": "0x2DBe0E264C7C246e05c6614794899937f264cf7b",
+		"positionWidth": 10,
+		"symbol": "WETH-USDT",
+		"twapInterval": 120
+	},
+	{
+		"compoundToken": "0x4200000000000000000000000000000000000006",
+		"maxTickDeviation": 5,
+		"pool": "0x4dbdcB087992404Ea9B14fA83cc695b02797F39a",
+		"positionWidth": 10,
+		"symbol": "WETH-EURC",
+		"twapInterval": 120
+	},
+	{
+		"compoundToken": "0x4200000000000000000000000000000000000006",
+		"maxTickDeviation": 5,
+		"pool": "0xdeBAEbE5B2729f7D62072b2eA40472d78d2C1626",
+		"positionWidth": 26,
+		"symbol": "WETH-VVV",
+		"twapInterval": 120
+	},
+	{
+		"compoundToken": "0x4200000000000000000000000000000000000006",
+		"maxTickDeviation": 5,
+		"pool": "0x3626a7c07CF4a7EdEF2eC5d5d4B25bc8ab2C03F2",
+		"positionWidth": 15,
+		"symbol": "WETH-MORPHO",
+		"twapInterval": 120
 	}
 ]
