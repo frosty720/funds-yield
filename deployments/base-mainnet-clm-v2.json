@@ -1,7 +1,7 @@
 {
   "poolDeployer": "0x8a494d4f32A228c3839CF12E640707296B8e63E7",
   "strategyFactory": "0x99c49323e589136BD4F9937b6ae226fD25A267aa",
-  "strategyImplementation": "0x6850E8e29D6EAC6376b6460c2C62c83014491EC9",
+  "strategyImplementation": "0x128f4652E661A0DBb577d7Fa87Dd902F0Af0Cd67",
   "strategyName": "FrostyClmStrategy-v2",
   "vaultFactory": "0x13a4FD7dD96D01BA22bddF8e3D8B56b81c073C74",
   "vaults": {
