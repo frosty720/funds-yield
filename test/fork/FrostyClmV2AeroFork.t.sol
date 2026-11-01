@@ -124,7 +124,7 @@ contract FrostyClmV2AeroForkTest is Test {
 
 	// ─── fees ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
-	function test_harvest_collectsBothTokensFees_paysTheFeeInKind_andLocksTheRest() public {
+	function test_harvest_collectsBothTokensFees_paysTheFeeInKind_andCompoundsTheRest() public {
 		vm.skip(!forked);
 		_deposit(alice, 10 ether, 30_000e6);
 		_trade(8);
@@ -144,8 +144,8 @@ contract FrostyClmV2AeroForkTest is Test {
 		assertEq(IERC20(USDC).balanceOf(TREASURY) - treasury1, perf1);
 		assertEq(strategy.fees0(), 0);
 		assertEq(strategy.fees1(), 0);
-		assertEq(strategy.totalLocked0(), got0 - perf0, 'the rest is locked, to be released over a day');
-		assertEq(strategy.totalLocked1(), got1 - perf1);
+		assertEq(strategy.totalLocked0(), 0, 'nothing is locked');
+		assertEq(strategy.totalLocked1(), 0);
 		assertEq(strategy.lastHarvest(), block.timestamp);
 	}
 
@@ -166,31 +166,92 @@ contract FrostyClmV2AeroForkTest is Test {
 		assertEq(received, expected, 'net fees, WETH valued at the pool price');
 	}
 
-	function test_fees_reachTheSharePriceOnlyOverTheDayAfterAHarvest() public {
+	/// Fees join the share price when collected, and a deposit collects first: the price it pays includes them.
+	function test_fees_reachTheSharePriceWhenCollected_nothingIsParkedOrLocked() public {
 		vm.skip(!forked);
 		_deposit(alice, 10 ether, 30_000e6);
 		_trade(8);
-		(uint256 before0, uint256 before1) = strategy.balances();
 
-		// a deposit collects the fees, but they aren't the depositors' until a harvest releases them
 		_deposit(bob, 0.01 ether, 30e6);
-		assertGt(strategy.fees0() + strategy.fees1(), 0);
+		assertEq(strategy.fees0() + strategy.fees1(), 0, 'nothing parked');
 		(uint256 this0, uint256 this1) = strategy.balancesOfThis();
-		assertEq(this0, IERC20(WETH).balanceOf(address(strategy)) - strategy.fees0(), 'balancesOfThis leaves the fees out');
-		assertEq(this1, IERC20(USDC).balanceOf(address(strategy)) - strategy.fees1());
+		assertEq(this0, IERC20(WETH).balanceOf(address(strategy)));
+		assertEq(this1, IERC20(USDC).balanceOf(address(strategy)));
 
 		vm.prank(keeper);
 		strategy.harvest();
 		(uint256 locked0, uint256 locked1) = strategy.lockedProfit();
-		assertEq(locked0, strategy.totalLocked0());
-		assertEq(locked1, strategy.totalLocked1());
+		assertEq(locked0 + locked1, 0, 'nothing locked');
 		(uint256 harvest0, uint256 harvest1) = strategy.balances();
-		uint256 valueAtHarvest = _value(harvest0, harvest1);
-
 		skip(DURATION);
 		(uint256 after0, uint256 after1) = strategy.balances();
-		assertGt(_value(after0, after1), valueAtHarvest, 'released after a day');
-		assertGt(_value(after0, after1), _value(before0, before1), 'more than before the fees, plus bob');
+		assertApproxEqRel(_value(after0, after1), _value(harvest0, harvest1), 1e15, 'no release a day later');
+	}
+
+	/// The subgraph's yield sums Compounded: fees a deposit collects are reported then, not lost to the next harvest.
+	function test_everyCollectReportsItsFees() public {
+		vm.skip(!forked);
+		_deposit(alice, 10 ether, 30_000e6);
+		_trade(8);
+		vm.recordLogs();
+		_deposit(bob, 0.01 ether, 30e6);
+		Vm.Log[] memory logs = vm.getRecordedLogs();
+		(uint256 got0, uint256 got1, uint256 perf0, uint256 perf1) = _feesCollected(logs);
+		uint256 received;
+		for (uint256 i; i < logs.length; ++i) {
+			if (logs[i].emitter == address(strategy) && logs[i].topics[0] == COMPOUNDED) (, received) = abi.decode(logs[i].data, (uint256, uint256));
+		}
+		assertGt(received, 0);
+		assertEq(received, (got1 - perf1) + (got0 - perf0) * strategy.price() / 1e36);
+	}
+
+	/// The red team's YIELD-02: Alice holds while the fees are earned, Bob arrives with the same capital right before the
+	/// harvest. Net of Bob's deposit fee (which the vault pays to who already holds), Alice leaves right after the harvest
+	/// with the fees she earned, and Bob, whose capital earned nothing, gets none of them.
+	function test_fees_stayWithWhoHeldWhileTheyWereEarned() public {
+		vm.skip(!forked);
+		uint256 aliceShares = _deposit(alice, 10 ether, 30_000e6);
+		uint256 aliceIn = _value(10 ether - IERC20(WETH).balanceOf(alice), 30_000e6 - IERC20(USDC).balanceOf(alice));
+		_trade(8);
+
+		vm.recordLogs();
+		uint256 bobShares = _deposit(bob, 10 ether, 30_000e6);
+		Vm.Log[] memory logs = vm.getRecordedLogs();
+		uint256 bobIn = _value(10 ether - IERC20(WETH).balanceOf(bob), 30_000e6 - IERC20(USDC).balanceOf(bob));
+		(uint256 got0, uint256 got1, uint256 perf0, uint256 perf1) = _feesCollected(logs);
+		uint256 earned = _value(got0 - perf0, got1 - perf1);
+		uint256 bobFee = _depositFeeValue(logs);
+		assertGt(earned, 0, 'Bob deposit collected the fees Alice earned');
+		vm.prank(keeper);
+		strategy.harvest();
+
+		_settle();
+		int256 aliceGain = int256(_exit(alice, aliceShares)) - int256(aliceIn);
+		skip(DURATION);
+		_settle();
+		int256 bobGain = int256(_exit(bob, bobShares)) - int256(bobIn);
+
+		assertGt(aliceGain - int256(bobFee), int256(earned * 8 / 10), 'the earner keeps the fees');
+		assertLt(bobGain + int256(bobFee), int256(earned * 2 / 10), 'the late entrant gets none');
+	}
+
+	/// @dev FrostyClmVault.Deposit's fee0/fee1, valued at the pool price.
+	function _depositFeeValue(Vm.Log[] memory logs) internal view returns (uint256) {
+		bytes32 topic = keccak256('Deposit(address,uint256,uint256,uint256,uint256,uint256)');
+		for (uint256 i; i < logs.length; ++i) {
+			if (logs[i].emitter != address(vault) || logs[i].topics[0] != topic) continue;
+			(,,, uint256 fee0, uint256 fee1) = abi.decode(logs[i].data, (uint256, uint256, uint256, uint256, uint256));
+			return _value(fee0, fee1);
+		}
+		return 0;
+	}
+
+	function _exit(address who, uint256 shares) internal returns (uint256) {
+		uint256 weth0 = IERC20(WETH).balanceOf(who);
+		uint256 usdc0 = IERC20(USDC).balanceOf(who);
+		vm.prank(who);
+		vault.withdraw(shares, 0, 0);
+		return _value(IERC20(WETH).balanceOf(who) - weth0, IERC20(USDC).balanceOf(who) - usdc0);
 	}
 
 	function test_withdraw_aWholeExitAfterAHarvest() public {

@@ -24,9 +24,11 @@ interface INftPositionManagerFactory {
 /// @notice FrostyFi 2026-10-25: FrostyClmStrategy without the gauge, for Aero's Slipstream pools. Aerodrome's gauges
 ///         were killed in the Aero upgrade (2026-10-22), and on Aero a position earns either AERO (staked) or the pool's
 ///         trading fees (unstaked, less the pool's 5% unstaked fee), never both. Most liquidity stakes, so unstaked
-///         positions split the fees (founder 2026-10-25: fee-earning vaults). The positions are never staked; a harvest
-///         collects their fees in both tokens, pays the performance fee in kind and compounds the rest, released to the
-///         share price over DURATION as in Beefy's fee-earning CLM (StrategyPassiveManagerUniswap._harvest).
+///         positions split the fees (founder 2026-10-25: fee-earning vaults). The positions are never staked. Every
+///         vault action and harvest collects their fees in both tokens and pays the performance fee in kind; the rest is in
+///         the share price at once, and a deposit is priced after that collect, so it pays for the fees already earned
+///         and they stay with whoever held while they were earned. Parked and released over a day after each harvest
+///         (Beefy's lock), they went to whoever held during that day instead (red-team YIELD-02, 2026-10-27).
 contract FrostyClmStrategyV2 is StratFeeManagerInitializable, IStrategyConcLiq, IStrategyVelodrome {
     using SafeERC20 for IERC20Metadata;
     using TickMath for int24;
@@ -48,8 +50,8 @@ contract FrostyClmStrategyV2 is StratFeeManagerInitializable, IStrategyConcLiq, 
     /// @notice The address of the second token in the liquidity pool.
     address public lpToken1;
 
-    /// @notice Collected trading fees, net of the performance fee, waiting for the next harvest. Out of the share
-    ///         price until then (balancesOfThis), as Beefy's fee-earning CLM keeps fees0/fees1.
+    /// @notice Unused since fees join the share price when collected (red-team YIELD-02, 2026-11-01). Kept: these
+    ///         strategies upgrade in place behind a beacon, so the storage layout stays.
     uint256 public fees0;
     uint256 public fees1;
 
@@ -431,17 +433,11 @@ contract FrostyClmStrategyV2 is StratFeeManagerInitializable, IStrategyConcLiq, 
         _harvest();
     }
 
-    /// @dev Refused while paused, as in v1. The fees join the positions now and reach the share price linearly over
-    ///      DURATION, so capital that arrives just before a harvest can't take the yield earned before it arrived
-    ///      (final review I1, 2026-10-13; Beefy's StrategyPassiveManagerUniswap._harvest).
+    /// @dev Refused while paused, as in v1. Capital that arrives just before a harvest can't take the yield earned before
+    ///      it arrived (final review I1, 2026-10-13): its deposit collected those fees first and paid for them.
     function _harvest() private onlyCalmPeriods {
         _whenStrategyNotPaused();
-        _claimEarnings();
-
-        uint256 received0 = fees0;
-        uint256 received1 = fees1;
-        fees0 = 0;
-        fees1 = 0;
+        (uint256 received0, uint256 received1) = _claimEarnings();
 
         // Before the first deposit there are no ticks to add to (and no fees).
         if (initTicks) {
@@ -449,21 +445,17 @@ contract FrostyClmStrategyV2 is StratFeeManagerInitializable, IStrategyConcLiq, 
             _addLiquidity();
         }
 
-        (uint256 currentLock0, uint256 currentLock1) = lockedProfit();
-        totalLocked0 = currentLock0 + received0;
-        totalLocked1 = currentLock1 + received1;
-
         lastHarvest = block.timestamp;
-        uint256 received = _valueInCompoundToken(received0, received1);
-        emit Compounded(0, received);
-        emit HarvestRewards(received);
+        emit HarvestRewards(_valueInCompoundToken(received0, received1));
     }
 
     /// @notice Collects the positions' trading fees and pays the performance fee in both pool tokens.
-    /// @dev FrostyFi 2026-10-25: deposits, withdrawals, rebalances and harvests all collect (as v1 claimed at each), so
-    ///      fees0/fees1 only ever hold fees already net of the performance fee. An unstaked position's collect takes its
-    ///      fees to date: the NFT manager pokes the pool first (Aero NonfungiblePositionManager.collect).
-    function _claimEarnings() private {
+    /// @dev FrostyFi 2026-10-25: deposits, withdrawals, rebalances and harvests all collect (as v1 claimed at each). An
+    ///      unstaked position's collect takes its fees to date: the NFT manager pokes the pool first (Aero
+    ///      NonfungiblePositionManager.collect).
+    /// @return net0 The token0 fees left for the depositors, after the performance fee.
+    /// @return net1 The token1 fees left for the depositors.
+    function _claimEarnings() private returns (uint256 net0, uint256 net1) {
         uint256 got0;
         uint256 got1;
         if (positionMain.nftId != 0) (got0, got1) = _collect(positionMain.nftId);
@@ -478,12 +470,14 @@ contract FrostyClmStrategyV2 is StratFeeManagerInitializable, IStrategyConcLiq, 
         address to = treasury();
         if (perf0 > 0) IERC20Metadata(lpToken0).safeTransfer(to, perf0);
         if (perf1 > 0) IERC20Metadata(lpToken1).safeTransfer(to, perf1);
-        fees0 += got0 - perf0;
-        fees1 += got1 - perf1;
+        net0 = got0 - perf0;
+        net1 = got1 - perf1;
 
         emit FeesCollected(got0, got1, perf0, perf1);
         if (perf0 > 0 || perf1 > 0) emit PerformanceFeePaid(to, _valueInCompoundToken(perf0, perf1));
         emit ClaimedRewards(_valueInCompoundToken(got0, got1));
+        // at every collect, since each one reaches the share price: the subgraph's yield sums these
+        if (net0 > 0 || net1 > 0) emit Compounded(0, _valueInCompoundToken(net0, net1));
     }
 
     /// @dev One position's fees. It holds no principal owed: _removeLiquidity collects and burns in one go.
@@ -512,38 +506,19 @@ contract FrostyClmStrategyV2 is StratFeeManagerInitializable, IStrategyConcLiq, 
     function balances() public view returns (uint256 token0Bal, uint256 token1Bal) {
         (uint256 thisBal0, uint256 thisBal1) = balancesOfThis();
         (uint256 poolBal0, uint256 poolBal1,,,,) = balancesOfPool();
-        // FrostyFi 2026-10-13 (final review I1): still-locked harvest proceeds aren't in the share price yet.
-        (uint256 locked0, uint256 locked1) = lockedProfit();
-
-        uint256 total0 = thisBal0 + poolBal0 - locked0;
-        uint256 total1 = thisBal1 + poolBal1 - locked1;
 
         // For token0 and token1 we return balance of this contract + balance of positions.
-        return (total0, total1);
+        return (thisBal0 + poolBal0, thisBal1 + poolBal1);
     }
 
     /**
-     * @notice FrostyFi 2026-10-13 (final review I1): the part of past harvests' proceeds not yet released to the share
-     *         price. Released linearly over DURATION and capped at what the strategy holds, as in Beefy's compounding CLM
-     *         (StrategyPassiveManagerUniswap.lockedProfit).
-     * @return locked0 The amount of token0 locked.
-     * @return locked1 The amount of token1 locked.
+     * @notice Nothing is locked: fees join the share price when collected (red-team YIELD-02, 2026-11-01). Kept for
+     *         the interface and for ClmVaultPriceFeed, which reads totalLocked0/1 for v1's vaults.
+     * @return locked0 Always 0.
+     * @return locked1 Always 0.
      */
-    function lockedProfit() public override view returns (uint256 locked0, uint256 locked1) {
-        (uint256 balThis0, uint256 balThis1) = balancesOfThis();
-        (uint256 balPool0, uint256 balPool1,,,,) = balancesOfPool();
-        uint256 totalBal0 = balThis0 + balPool0;
-        uint256 totalBal1 = balThis1 + balPool1;
-
-        uint256 elapsed = block.timestamp - lastHarvest;
-        uint256 remaining = elapsed < DURATION ? DURATION - elapsed : 0;
-
-        // Make sure we don't lock more than we have.
-        if (totalBal0 > totalLocked0) locked0 = totalLocked0 * remaining / DURATION;
-        else locked0 = totalBal0 * remaining / DURATION;
-
-        if (totalBal1 > totalLocked1) locked1 = totalLocked1 * remaining / DURATION;
-        else locked1 = totalBal1 * remaining / DURATION;
+    function lockedProfit() public override pure returns (uint256 locked0, uint256 locked1) {
+        return (0, 0);
     }
 
     /**
@@ -552,12 +527,8 @@ contract FrostyClmStrategyV2 is StratFeeManagerInitializable, IStrategyConcLiq, 
      * @return token1Bal The amount of token1 in the strategy.
     */
     function balancesOfThis() public view returns (uint256 token0Bal, uint256 token1Bal) {
-        // FrostyFi 2026-10-25: fees collected since the last harvest aren't the depositors' yet (ClmVaultPriceFeed
-        // reads this too). Capped, as Beefy's balances() caps unharvested fees.
-        uint256 bal0 = IERC20Metadata(lpToken0).balanceOf(address(this));
-        uint256 bal1 = IERC20Metadata(lpToken1).balanceOf(address(this));
-        token0Bal = bal0 > fees0 ? bal0 - fees0 : 0;
-        token1Bal = bal1 > fees1 ? bal1 - fees1 : 0;
+        token0Bal = IERC20Metadata(lpToken0).balanceOf(address(this));
+        token1Bal = IERC20Metadata(lpToken1).balanceOf(address(this));
     }
 
     /**
@@ -804,9 +775,6 @@ contract FrostyClmStrategyV2 is StratFeeManagerInitializable, IStrategyConcLiq, 
         if (IFrostyClmVault(vault).totalSupply() != 10**3) revert NotAuthorized();
         panic(0,0);
         address feeRecipient = treasury();
-        // FrostyFi 2026-10-25: everything the strategy holds, unharvested fees included.
-        fees0 = 0;
-        fees1 = 0;
         uint256 bal0 = IERC20Metadata(lpToken0).balanceOf(address(this));
         uint256 bal1 = IERC20Metadata(lpToken1).balanceOf(address(this));
         if (bal0 > 0) IERC20Metadata(lpToken0).safeTransfer(feeRecipient, bal0);
