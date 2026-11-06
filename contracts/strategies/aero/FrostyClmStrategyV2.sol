@@ -243,8 +243,9 @@ contract FrostyClmStrategyV2 is StratFeeManagerInitializable, IStrategyConcLiq, 
         if (_amount0 > 0) IERC20Metadata(lpToken0).safeTransfer(vault, _amount0);
         if (_amount1 > 0) IERC20Metadata(lpToken1).safeTransfer(vault, _amount1);
 
-        // After we take what is needed we add it all back to our positions.
-        if (!_isPaused()) _addLiquidity();
+        // After we take what is needed we add it all back to our positions, at a calm price only (red-team YIELD-01,
+        // 2026-11-06): not calm, the leaver is still paid and the rest waits in the strategy for the next calm re-add.
+        if (!_isPaused() && isCalm()) _addLiquidity();
 
         (uint256 bal0, uint256 bal1) = balances();
 

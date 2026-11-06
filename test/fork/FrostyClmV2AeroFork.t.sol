@@ -40,6 +40,7 @@ contract FrostyClmV2AeroForkTest is Test {
 	uint256 internal constant PERF_FEE_BPS = 950;
 	uint256 internal constant DURATION = 1 days; // StratFeeManagerInitializable.DURATION (internal)
 	int24 internal constant WIDTH = 10; // × tick spacing 50 = 500 ticks a side, about ±5%
+	int24 internal constant PUSH = 300; // past _config's 250-tick calm deviation, inside the 500-tick range
 
 	bytes32 internal constant FEES_COLLECTED = keccak256('FeesCollected(uint256,uint256,uint256,uint256)');
 	bytes32 internal constant COMPOUNDED = keccak256('Compounded(uint256,uint256)');
@@ -323,6 +324,130 @@ contract FrostyClmV2AeroForkTest is Test {
 		assertEq(vault.balanceOf(alice), 0);
 	}
 
+	// ─── not calm (red-team YIELD-01, 2026-11-06) ───────────────────────────────────────────────────────────────────
+
+	/// A withdrawal pays out whether or not the pool is calm, and never re-adds at a pushed price: what the others own
+	/// waits in the strategy until the next calm re-add.
+	function test_withdraw_whenNotCalm_paysTheLeaver_andAddsNothingBack() public {
+		vm.skip(!forked);
+		uint256 shares = _deposit(alice, 10 ether, 30_000e6);
+		_deposit(bob, 10 ether, 30_000e6);
+		_pushPrice(PUSH);
+		assertFalse(strategy.isCalm());
+		uint256 weth0 = IERC20(WETH).balanceOf(alice);
+		uint256 usdc0 = IERC20(USDC).balanceOf(alice);
+
+		vm.prank(alice);
+		vault.withdraw(shares, 0, 0);
+
+		assertEq(vault.balanceOf(alice), 0);
+		assertGt(IERC20(WETH).balanceOf(alice) - weth0, 0, 'paid in WETH');
+		assertGt(IERC20(USDC).balanceOf(alice) - usdc0, 0, 'and in USDC');
+		(uint256 mainId,,) = strategy.positionMain();
+		(uint256 altId,,) = strategy.positionAlt();
+		assertEq(mainId + altId, 0, 'nothing re-added at the pushed price');
+		(uint256 idle0, uint256 idle1) = strategy.balancesOfThis();
+		assertGt(idle0, 0, 'Bob still owns WETH, held by the strategy');
+		assertGt(idle1, 0, 'and USDC');
+	}
+
+	/// Bob's claim per share is what it was before Alice left, plus his share of the fees her withdrawal collected.
+	function test_withdraw_whenNotCalm_leavesTheOthersClaimWhole() public {
+		vm.skip(!forked);
+		uint256 aliceShares = _deposit(alice, 10 ether, 30_000e6);
+		uint256 bobShares = _deposit(bob, 10 ether, 30_000e6);
+		_pushPrice(PUSH);
+		uint256 supply = vault.totalSupply();
+		(uint256 before0, uint256 before1) = strategy.balances();
+
+		vm.recordLogs();
+		vm.prank(alice);
+		vault.withdraw(aliceShares, 0, 0);
+		(uint256 got0, uint256 got1, uint256 perf0, uint256 perf1) = _feesCollected(vm.getRecordedLogs());
+
+		uint256 left = vault.totalSupply();
+		assertEq(left, supply - aliceShares);
+		(uint256 after0, uint256 after1) = strategy.balances();
+		assertApproxEqAbs(after0 * bobShares / left, (before0 + got0 - perf0) * bobShares / supply, 10, 'WETH');
+		assertApproxEqAbs(after1 * bobShares / left, (before1 + got1 - perf1) * bobShares / supply, 10, 'USDC');
+	}
+
+	/// The next calm harvest (the keeper's daily one) puts what waited back in the pool.
+	function test_harvest_afterANotCalmWithdrawal_reAddsTheLiquidity() public {
+		vm.skip(!forked);
+		uint256 shares = _deposit(alice, 10 ether, 30_000e6);
+		_deposit(bob, 10 ether, 30_000e6);
+		int24 start = _tick();
+		_pushPrice(PUSH);
+		vm.prank(alice);
+		vault.withdraw(shares, 0, 0);
+
+		_pushPrice(start - _tick());
+		_settle();
+		assertTrue(strategy.isCalm());
+		vm.prank(keeper);
+		strategy.harvest();
+
+		(uint256 mainId,,) = strategy.positionMain();
+		assertGt(mainId, 0, 'back in the pool');
+		(uint256 idle0, uint256 idle1) = strategy.balancesOfThis();
+		(uint256 all0, uint256 all1) = strategy.balances();
+		assertLt(_value(idle0, idle1), _value(all0, all1) / 1000, 'under 0.1% left idle');
+	}
+
+	/// The keeper's re-centre of idle tokens (funds-keeper src/clm/upkeep.ts, YIELD-01): once calm, moveTicks puts it all
+	/// back on a fresh range, whichever way the price went (a harvest re-adds on the old range, where it may not fit).
+	function test_moveTicks_afterANotCalmWithdrawal_reAddsItAll_priceUp() public {
+		_reAddAfterANotCalmExit(PUSH);
+	}
+
+	function test_moveTicks_afterANotCalmWithdrawal_reAddsItAll_priceDown() public {
+		_reAddAfterANotCalmExit(-PUSH);
+	}
+
+	function _reAddAfterANotCalmExit(int24 push) internal {
+		vm.skip(!forked);
+		uint256 shares = _deposit(alice, 10 ether, 30_000e6);
+		_deposit(bob, 10 ether, 30_000e6);
+		_pushPrice(push);
+		vm.prank(alice);
+		vault.withdraw(shares, 0, 0);
+		_settle();
+		assertTrue(strategy.isCalm(), 'calm at the new price');
+
+		vm.prank(rebalancer);
+		strategy.moveTicks();
+
+		(uint256 idle0, uint256 idle1) = strategy.balancesOfThis();
+		(uint256 all0, uint256 all1) = strategy.balances();
+		assertLt(_value(idle0, idle1), _value(all0, all1) / 1000, 'under 0.1% left idle');
+	}
+
+	/// Deposits still wait for calm: a deposit adds at the pool's price.
+	function test_deposit_whenNotCalm_stillReverts() public {
+		vm.skip(!forked);
+		_deposit(alice, 10 ether, 30_000e6);
+		_pushPrice(PUSH);
+		_fundAndApprove(bob, 1 ether, 3_000e6);
+		vm.prank(bob);
+		vm.expectRevert(FrostyClmStrategyV2.NotCalm.selector);
+		vault.deposit(1 ether, 3_000e6, 0);
+	}
+
+	/// A withdrawal in the deposit's own block still needs calm (Beefy's guard on a same-block deposit and exit).
+	function test_withdraw_inTheBlockOfADeposit_whenNotCalm_stillReverts() public {
+		vm.skip(!forked);
+		_deposit(alice, 10 ether, 30_000e6);
+		_fundAndApprove(bob, 10 ether, 30_000e6);
+		vm.prank(bob);
+		vault.deposit(10 ether, 30_000e6, 0);
+		uint256 shares = vault.balanceOf(bob);
+		_pushPrice(PUSH);
+		vm.prank(bob);
+		vm.expectRevert(FrostyClmStrategyV2.NotCalm.selector);
+		vault.withdraw(shares, 0, 0);
+	}
+
 	// ─── helpers ────────────────────────────────────────────────────────────────────────────────────────────────────
 
 	function _config(address pool, address compoundToken) internal pure returns (ClmPoolDeployerV2.PoolConfig memory) {
@@ -358,6 +483,15 @@ contract FrostyClmV2AeroForkTest is Test {
 		shares = vault.balanceOf(user) - before;
 		vm.stopPrank();
 		_settle();
+	}
+
+	function _fundAndApprove(address user, uint256 amount0, uint256 amount1) internal {
+		deal(WETH, user, IERC20(WETH).balanceOf(user) + amount0);
+		deal(USDC, user, IERC20(USDC).balanceOf(user) + amount1);
+		vm.startPrank(user);
+		IERC20(WETH).approve(address(vault), amount0);
+		IERC20(USDC).approve(address(vault), amount1);
+		vm.stopPrank();
 	}
 
 	/// @dev `rounds` of selling 20 WETH, then selling back the USDC it got: fees in both tokens, the price back near
