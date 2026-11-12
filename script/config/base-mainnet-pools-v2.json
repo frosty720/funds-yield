@@ -110,5 +110,85 @@
 		"positionWidth": 15,
 		"symbol": "WETH-MORPHO",
 		"twapInterval": 120
+	},
+	{
+		"compoundToken": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+		"maxTickDeviation": 9,
+		"pool": "0x532e0F46d1e528507FC9454d5847C231f23bDDf6",
+		"positionWidth": 50,
+		"symbol": "USDC-AMZNc",
+		"twapInterval": 120
+	},
+	{
+		"compoundToken": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+		"maxTickDeviation": 9,
+		"pool": "0xF5FCB9CDAFcE67d50AfEf298F88E709d2B946BA6",
+		"positionWidth": 50,
+		"symbol": "USDC-AAPLc",
+		"twapInterval": 120
+	},
+	{
+		"compoundToken": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+		"maxTickDeviation": 9,
+		"pool": "0x294666AD6a415E8C33Af801225c04079BB4f1133",
+		"positionWidth": 50,
+		"symbol": "USDC-CRCLc",
+		"twapInterval": 120
+	},
+	{
+		"compoundToken": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+		"maxTickDeviation": 9,
+		"pool": "0x3D384288fA79B51De882B06B617aB7989CcAd4f3",
+		"positionWidth": 50,
+		"symbol": "USDC-INTCc",
+		"twapInterval": 120
+	},
+	{
+		"compoundToken": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+		"maxTickDeviation": 9,
+		"pool": "0x41e21950362B1014bC629252ecFFF8fcA5F1646C",
+		"positionWidth": 50,
+		"symbol": "USDC-MUc",
+		"twapInterval": 120
+	},
+	{
+		"compoundToken": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+		"maxTickDeviation": 9,
+		"pool": "0x138Cb591C4A7D854D796E1906af8228d84CB7642",
+		"positionWidth": 50,
+		"symbol": "USDC-AMDc",
+		"twapInterval": 120
+	},
+	{
+		"compoundToken": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+		"maxTickDeviation": 9,
+		"pool": "0xA0473ceD0cd1bfB857e3E04B5FA4b6aF18C5e44d",
+		"positionWidth": 50,
+		"symbol": "USDC-PLTRc",
+		"twapInterval": 120
+	},
+	{
+		"compoundToken": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+		"maxTickDeviation": 9,
+		"pool": "0x67Ba8dBeDC6D7f93f0F5967Aa2420715f1edC756",
+		"positionWidth": 50,
+		"symbol": "USDC-NFLXc",
+		"twapInterval": 120
+	},
+	{
+		"compoundToken": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+		"maxTickDeviation": 9,
+		"pool": "0x2b7ee4623ec6AfbC1e587b2668c0ED8F3ff44949",
+		"positionWidth": 50,
+		"symbol": "USDC-LLYc",
+		"twapInterval": 120
+	},
+	{
+		"compoundToken": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+		"maxTickDeviation": 9,
+		"pool": "0x086A1447D0851F0aeA9D09D6c547fEC8E97be413",
+		"positionWidth": 50,
+		"symbol": "USDC-AVGOc",
+		"twapInterval": 120
 	}
 ]
