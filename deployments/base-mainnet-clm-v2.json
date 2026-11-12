@@ -5,10 +5,45 @@
   "strategyName": "FrostyClmStrategy-v2",
   "vaultFactory": "0x13a4FD7dD96D01BA22bddF8e3D8B56b81c073C74",
   "vaults": {
+    "USDC-AAPLc": {
+      "pool": "0xF5FCB9CDAFcE67d50AfEf298F88E709d2B946BA6",
+      "strategy": "0x01433e060682bEAfFE7998cD680cF3633C29B04d",
+      "vault": "0x52911E30dA42D9202f48ADBCD0d455a8D67257C7"
+    },
+    "USDC-AMDc": {
+      "pool": "0x138Cb591C4A7D854D796E1906af8228d84CB7642",
+      "strategy": "0xBF4f8bA41e2E3AF79085050D695B51401575A5be",
+      "vault": "0x3eC8bDBbEbB4eb33Bc65aC2446Ea5e471C4B72e3"
+    },
+    "USDC-AMZNc": {
+      "pool": "0x532e0F46d1e528507FC9454d5847C231f23bDDf6",
+      "strategy": "0x82b3D47f7307D2D6F900Fd0416f2939e4E363FAd",
+      "vault": "0xfAFffDc42b3886640E13f8d31f9DF9F1C16F4504"
+    },
+    "USDC-AVGOc": {
+      "pool": "0x086A1447D0851F0aeA9D09D6c547fEC8E97be413",
+      "strategy": "0xE3a844C8B76605a3E01FAAFEe0355be1bf8f43AF",
+      "vault": "0xae32aafBd4c1c15190C332F43d4368806Fa623Bd"
+    },
+    "USDC-CRCLc": {
+      "pool": "0x294666AD6a415E8C33Af801225c04079BB4f1133",
+      "strategy": "0x9E825D796a3f312DFA1984f8bA46A453550B00E7",
+      "vault": "0x28127E9C9E2BFA71176bBC2Da4e866b50927b6AD"
+    },
     "USDC-GOOGLc": {
       "pool": "0x16c70F04C3080a127486Cdf5a4C33c066bBF47C3",
       "strategy": "0xFcf1a1FE1B14CA5129918e104eCb5D86E3B6b11F",
       "vault": "0x07bBd99f9e5098A525789860e83646F3d69Eb634"
+    },
+    "USDC-INTCc": {
+      "pool": "0x3D384288fA79B51De882B06B617aB7989CcAd4f3",
+      "strategy": "0x64B849d3134E39693baf04F71EDE5683C630D79e",
+      "vault": "0x30A14C5c78F508509bbA2fe4e2D20B128BcFb62c"
+    },
+    "USDC-LLYc": {
+      "pool": "0x2b7ee4623ec6AfbC1e587b2668c0ED8F3ff44949",
+      "strategy": "0xaD101536ea219fe6a928A397b7b631eC783FEf37",
+      "vault": "0x440f85B5251f31469C2f930b12E84d6218135437"
     },
     "USDC-METAc": {
       "pool": "0xd072410fa13D242e1d53721Bcf7AF02e3455DC96",
@@ -25,10 +60,25 @@
       "strategy": "0xa11f2c01903c963A091f8eBD9234b15de563971c",
       "vault": "0xeeAf2D766B148A62e74e8aF6a2427769fD5fe784"
     },
+    "USDC-MUc": {
+      "pool": "0x41e21950362B1014bC629252ecFFF8fcA5F1646C",
+      "strategy": "0x192ef7414122AeCa08c128e2B4f280539eec564E",
+      "vault": "0xE8bCA3345BC73174F6806B866abC74C417cF99Fc"
+    },
+    "USDC-NFLXc": {
+      "pool": "0x67Ba8dBeDC6D7f93f0F5967Aa2420715f1edC756",
+      "strategy": "0x033f3ab80BAd589feb7740Adc7e50d538A278cf1",
+      "vault": "0xBa120c56a4627c302ac1243a047E523cd56Ad36A"
+    },
     "USDC-NVDAc": {
       "pool": "0xF668e21993f0ACd7ab00BB1cFbAeD0df28A3C8EC",
       "strategy": "0x3A528484301d26597b9Bf44567e01eBB43e8a604",
       "vault": "0x5711FD24A8ADc8299a889fE7db87Ff7d58cA1C38"
+    },
+    "USDC-PLTRc": {
+      "pool": "0xA0473ceD0cd1bfB857e3E04B5FA4b6aF18C5e44d",
+      "strategy": "0xEB5a1B7F0D5e4effE6b89401332Ab216F33bDB3A",
+      "vault": "0x22C63Dd194ac1CeEAe51Ef46eF1290e2F6882554"
     },
     "USDC-SNDKc": {
       "pool": "0x2836e062a3fe75943a7F4A552E2365b98E414E75",
