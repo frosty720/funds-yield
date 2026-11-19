@@ -190,5 +190,37 @@
 		"positionWidth": 50,
 		"symbol": "USDC-AVGOc",
 		"twapInterval": 120
+	},
+	{
+		"compoundToken": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+		"maxTickDeviation": 9,
+		"pool": "0x599C4225FE90214795a0be228D20d7680f8CED15",
+		"positionWidth": 50,
+		"symbol": "USDC-ANTc",
+		"twapInterval": 120
+	},
+	{
+		"compoundToken": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+		"maxTickDeviation": 9,
+		"pool": "0xDe2BfE5409aD9e825cdB3562A06EDaFb9d753DFc",
+		"positionWidth": 50,
+		"symbol": "USDC-BEc",
+		"twapInterval": 120
+	},
+	{
+		"compoundToken": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+		"maxTickDeviation": 9,
+		"pool": "0x18907cAE5a9c7b45F85c5d2e1F7508C27c134f83",
+		"positionWidth": 50,
+		"symbol": "USDC-TTWOc",
+		"twapInterval": 120
+	},
+	{
+		"compoundToken": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+		"maxTickDeviation": 9,
+		"pool": "0x4ae3780242F43ef63C471Fb8c2E9D30ec5fd5821",
+		"positionWidth": 50,
+		"symbol": "USDC-MRNAc",
+		"twapInterval": 120
 	}
 ]
